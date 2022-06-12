@@ -3,6 +3,7 @@
 data/
 pretrain_model/
 DANsnapshots/
+workdir/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

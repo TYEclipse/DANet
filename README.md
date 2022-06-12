@@ -11,11 +11,15 @@ The architecture of our Domain Agent Network:
 ## Environment
 
 ```
-conda create -n FSVOS python=3.6
+git clone git@github.com:scutpaul/DANet.git
+conda create -n FSVOS python=3.9
 conda activate FSVOS
-conda install pytorch==1.6.0 torchvision==0.7.0 cudatoolkit=10.2 -c pytorch
-conda install opencv cython
-pip install easydict imgaug
+conda install pytorch torchvision torchaudio cudatoolkit=10.2 -c pytorch
+pip install opencv-python cython easydict imgaug
+
+git clone git@github.com:youtubevos/cocoapi.git
+cd cocoapi/PythonAPI
+python setup.py build_ext install
 ```
 
 
