@@ -5,12 +5,10 @@
 import os
 import shutil
 import torch
-import numpy as np
 
 
 def restore(args, model, test_best=False):
 
-    group = args.group
     savedir = args.snapshot_dir
     filename = 'epoch_%d.pth.tar' % (args.restore_epoch)
     if test_best:
@@ -68,7 +66,8 @@ def get_model_para_number(model):
 def get_save_dir(args):
     snapshot_dir = os.path.join(
         args.snapshot_dir, args.arch,
-        'id_%d_group_%d_of_%d' % (args.trainid, args.group, args.num_folds))
+        'id_{}_group_{}_of_{}'.format(args.trainid, args.group,
+                                      args.num_folds))
     return snapshot_dir
 
 

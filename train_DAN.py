@@ -3,9 +3,7 @@
 # @Author  : Haoxin Chen
 # @File    : train_DAN.py
 import argparse
-import json
 import os
-import time
 
 import numpy as np
 import torch
@@ -14,8 +12,8 @@ from torch.utils.data import DataLoader
 from libs.config.DAN_config import OPTION as opt
 from libs.dataset.transform import TestTransform, TrainTransform
 from libs.dataset.YoutubeVOS import YTVOSDataset
-from libs.models.DAN import DAN
-from libs.utils.Logger import LogTime, Loss_record, Tee, TimeRecord
+from libs.models.DAN.DAN import DAN
+from libs.utils.Logger import LogTime, Loss_record, Logger, TimeRecord
 from libs.utils.Logger import TreeEvaluation as Evaluation
 from libs.utils.loss import cross_entropy_loss, mask_iou_loss
 from libs.utils.optimer import DAN_optimizer
@@ -65,22 +63,21 @@ def criterion(pred, target, bootstrap=1):
     ]
 
 
-def train(args):
+def train(args, logger: Logger):
     # build models
-    print('==> Building Models', args.arch)
-    net = eval(args.arch).DAN()
-    print('    Total params: %.2fM' %
-          (sum(p.numel() for p in net.parameters()) / 1000000.0))
+    logger.info('Building model...')
+    net = DAN()
+    total_params = sum(p.numel() for p in net.parameters())
+    logger.info('Total number of parameters: {}M'.format(total_params / 1e6))
 
     optimizer = DAN_optimizer(net)
     net = net.cuda()
 
     if args.restore_epoch > 0:
         restore(args, net)
-        print("Resume training...")
-        print("Resume_epoch: %d" % (args.restore_epoch))
+        logger.info('Restore model from epoch {}'.format(args.restore_epoch))
 
-    print('==> Preparing dataset')
+    logger.info('Loading data...')
     tsfm_train = TrainTransform(args.input_size)
     tsfm_val = TestTransform(args.input_size)
 
@@ -114,7 +111,7 @@ def train(args):
                             num_workers=2)
 
     # set loss
-    print('==> Setting Loss')
+    logger.info('Setting loss...')
 
     losses = Loss_record()
     train_evaluations = Evaluation(class_list=train_list)
@@ -123,27 +120,25 @@ def train(args):
     # set epoch
     start_epoch = args.restore_epoch
     train_iters = len(train_loader)
-    val_iters = len(val_loader)
-    print('training iters per epoch: ', train_iters)
-    print('valid iters per epoch: ', val_iters)
+    logger.info('Training {} epochs with {} iters per epoch'.format(
+        args.max_epoch, train_iters))
     best_iou = 0
-    max_step = int(train_iters / args.step_iter)
-    train_time_record = TimeRecord(max_step, args.max_epoch)
-    trained_iter = train_iters * start_epoch
-    print('Start training')
+    train_time_record = TimeRecord(max_epoch=args.max_epoch,
+                                   max_iter=train_iters)
     for epoch in range(start_epoch, args.max_epoch):
-        print('==> Training epoch {:d}'.format(epoch))
+        logger.info('Epoch {}/{}'.format(epoch, args.max_epoch - 1))
         # train
-        begin_time = time.time()
         is_best = False
         net.train()
 
         for iter, data in enumerate(train_loader):
-            trained_iter += 1
             query_img, query_mask, support_img, support_mask, idx = data
             # B N C H W
-            query_img, query_mask, support_img, support_mask, idx \
-                = query_img.cuda(), query_mask.cuda(), support_img.cuda(), support_mask.cuda(), idx.cuda()
+            query_img = query_img.cuda()
+            query_mask = query_mask.cuda()
+            support_img = support_img.cuda()
+            support_mask = support_mask.cuda()
+            idx = idx.cuda()
 
             pred_map = net(query_img, support_img, support_mask)
             # ouptut [batch, Frame, 1, 241 425]
@@ -161,20 +156,21 @@ def train(args):
             train_evaluations.update_evl(idx, query_mask, pred_map)
 
             if iter % args.step_iter == 0 and iter > 0:
-                step_time, remain_time = train_time_record.gettime(
-                    epoch, begin_time)
-                iou_str = train_evaluations.logiou(epoch, iter)
-                loss_str = losses.getloss(epoch, iter)
-                print(
-                    loss_str, ' | ', iou_str, ' | ',
-                    'Step: %.4f s \t Remain: %.4f h' %
-                    (step_time, remain_time))
-                begin_time = time.time()
+                total_time_str, remain_time_str = train_time_record.get_time(
+                    epoch, iter)
+                iou_str = train_evaluations.logiou()
+                loss_str = losses.getloss()
+                logger.info('[Train:{}/{}] Step: {}/{} Time: {}/{} '
+                            'IOU: {} Loss: {}'.format(epoch,
+                                                      args.max_epoch - 1, iter,
+                                                      train_iters,
+                                                      total_time_str,
+                                                      remain_time_str, iou_str,
+                                                      loss_str))
 
         # validation
         if not args.novalid:
             net.eval()
-            valid_step = len(val_loader)
             valid_time = LogTime()
             valid_time.t1()
             with torch.no_grad():
@@ -193,10 +189,8 @@ def train(args):
                 best_iou = mean_iou
             iou_list = ['%.4f' % n for n in valid_evaluations.iou_list]
             strings_iou_list = ' '.join(iou_list)
-            print('valid ', valid_evaluations.logiou(epoch, valid_step), ' ',
-                  strings_iou_list, ' | ',
-                  'valid_time: %.4f s' % valid_time.getalltime(), 'is_best',
-                  is_best)
+            logger.info('[Valid:{}/{}] Mean IOU: {:.4f} IOU: {}'.format(
+                epoch, args.max_epoch - 1, mean_iou, strings_iou_list))
 
         save_model(args, epoch, net, optimizer, is_best)
 
@@ -214,10 +208,16 @@ if __name__ == '__main__':
     args.snapshot_dir = get_save_dir(args)
 
     # 创建日志文件
-    logger = Tee(os.path.join(args.snapshot_dir, 'train_log.txt'), 'w')
-
-    print('Running parameters:\n')
-    print(json.dumps(vars(args), indent=4, separators=(',', ':')))
+    count = 1
+    log_file = os.path.join(args.snapshot_dir,
+                            'train_log_{}.txt'.format(count))
+    while os.path.exists(log_file):
+        count += 1
+        log_file = os.path.join(args.snapshot_dir,
+                                'train_log_{}.txt'.format(count))
+    logger = Logger(log_file)
+    logger.info('Running parameters:')
+    logger.info(str(args))
 
     # 训练模型
-    train(args)
+    train(args, logger)

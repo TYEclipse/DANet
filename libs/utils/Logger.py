@@ -6,6 +6,25 @@ import torch
 import numpy as np
 import time
 import sys
+import datetime
+
+
+class Logger(object):
+    def __init__(self, log_file_name):
+        self.log_file_name = log_file_name
+        self.log_file = open(log_file_name, 'w')
+        self.log_file.write('%s\n' % self._get_time_str())
+
+    def __del__(self):
+        self.log_file.close()
+
+    def _get_time_str(self):
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+
+    def info(self, msg):
+        self.log_file.write('%s\n' % msg)
+        self.log_file.flush()
+        print(msg)
 
 
 class Tee(object):
@@ -28,7 +47,6 @@ class Tee(object):
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
-
     def __init__(self):
         self.reset()
 
@@ -48,7 +66,6 @@ class AverageMeter(object):
 
 class Loss_record():
     '''save the loss: total(tensor), part1 and part2 can be 0'''
-
     def __init__(self):
         self.total = AverageMeter()
         self.part1 = AverageMeter()
@@ -63,29 +80,33 @@ class Loss_record():
         self.part3.reset()
         self.part4.reset()
 
-    def updateloss(self, loss_val, loss_part1=0, loss_part2=0, loss_part3=0, loss_part4=0):
+    def updateloss(self,
+                   loss_val,
+                   loss_part1=0,
+                   loss_part2=0,
+                   loss_part3=0,
+                   loss_part4=0):
         self.total.update(loss_val.data.item(), 1)
-        self.part1.update(loss_part1.data.item(), 1) if isinstance(loss_part1, torch.Tensor) else self.part1.update(0,
-                                                                                                                    1)
-        self.part2.update(loss_part2.data.item(), 1) if isinstance(loss_part2, torch.Tensor) else self.part2.update(0,
-                                                                                                                    1)
-        self.part3.update(loss_part3.data.item(), 1) if isinstance(loss_part3, torch.Tensor) else self.part3.update(0,
-                                                                                                                    1)
-        self.part4.update(loss_part4.data.item(), 1) if isinstance(loss_part4, torch.Tensor) else self.part4.update(0,
-                                                                                                                    1)
+        self.part1.update(loss_part1.data.item(), 1) if isinstance(
+            loss_part1, torch.Tensor) else self.part1.update(0, 1)
+        self.part2.update(loss_part2.data.item(), 1) if isinstance(
+            loss_part2, torch.Tensor) else self.part2.update(0, 1)
+        self.part3.update(loss_part3.data.item(), 1) if isinstance(
+            loss_part3, torch.Tensor) else self.part3.update(0, 1)
+        self.part4.update(loss_part4.data.item(), 1) if isinstance(
+            loss_part4, torch.Tensor) else self.part4.update(0, 1)
 
-    def getloss(self, epoch, step):
+    def getloss(self):
         ''' get every step loss and reset '''
         total_avg = self.total.avg()
         part1_avg = self.part1.avg()
         part2_avg = self.part2.avg()
         part3_avg = self.part3.avg()
         part4_avg = self.part4.avg()
-        out_str = 'epoch %d, step %d : %.4f, %.4f, %.4f, %.4f, %.4f' % \
-                  (epoch, step, total_avg, part1_avg, part2_avg, part3_avg, part4_avg)
+        out_str = 'total: %.4f, part1: %.4f, part2: %.4f, part3: %.4f, part4: %.4f' % (
+            total_avg, part1_avg, part2_avg, part3_avg, part4_avg)
         self.reset()
         return out_str
-
 
 
 def measure(y_in, pred_in):
@@ -104,7 +125,6 @@ from libs.utils.davis_JF import db_eval_boundary, db_eval_iou
 
 class TreeEvaluation():
     '''eval training output'''
-
     def __init__(self, class_list=None):
         assert class_list is not None
         self.class_indexes = class_list
@@ -142,15 +162,18 @@ class TreeEvaluation():
 
             self.tp_list[id] += tp
             self.total_list[id] += total
-        self.iou_list = [self.tp_list[ic] /
-                         float(max(self.total_list[ic], 1))
-                         for ic in range(self.num_classes)]
-        self.f_score = [self.f_list[ic] /
-                        float(max(self.n_list[ic], 1))
-                        for ic in range(self.num_classes)]
-        self.j_score = [self.j_list[ic] /
-                        float(max(self.n_list[ic], 1))
-                        for ic in range(self.num_classes)]
+        self.iou_list = [
+            self.tp_list[ic] / float(max(self.total_list[ic], 1))
+            for ic in range(self.num_classes)
+        ]
+        self.f_score = [
+            self.f_list[ic] / float(max(self.n_list[ic], 1))
+            for ic in range(self.num_classes)
+        ]
+        self.j_score = [
+            self.j_list[ic] / float(max(self.n_list[ic], 1))
+            for ic in range(self.num_classes)
+        ]
 
     def test_in_train(self, query_label, pred):
         # test N*H*F
@@ -161,23 +184,33 @@ class TreeEvaluation():
         total = tp + fp + fn
         return tp, total
 
-    def logiou(self, epoch=None, step=None):
+    def logiou(self):
         mean_iou = np.mean(self.iou_list)
         out_str = 'iou: %.4f' % mean_iou
         self.setup()
         return out_str
 
 
-
 class TimeRecord():
-    def __init__(self, maxstep, max_epoch):
-        self.maxstep = maxstep
+    def __init__(self, max_epoch, max_iter):
         self.max_epoch = max_epoch
+        self.max_iter = max_iter
+        self.start_time = time.time()
 
-    def gettime(self, epoch, begin_time):
-        step_time = time.time() - begin_time
-        remaining_time = (self.max_epoch - epoch) * step_time * self.maxstep / 3600
-        return step_time, remaining_time
+    def get_time(self, epoch, iter):
+        now_time = time.time()
+        total_time = now_time - self.start_time
+        total_iter = epoch * self.max_iter + iter
+        remain_iter = self.max_epoch * self.max_iter - total_iter
+        remain_time = remain_iter * total_time / total_iter
+        # time_str "xx:xx:xx"
+        total_time_str = '{:02d}:{:02d}:{:02d}'.format(
+            int(total_time // 3600), int(total_time % 3600 // 60),
+            int(total_time % 60))
+        remain_time_str = '{:02d}:{:02d}:{:02d}'.format(
+            int(remain_time // 3600), int(remain_time % 3600 // 60),
+            int(remain_time % 60))
+        return total_time_str, remain_time_str
 
 
 class LogTime():
