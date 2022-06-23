@@ -2,11 +2,13 @@
 # -*- coding: utf-8 -*-
 # @Author  : Haoxin Chen
 # @File    : Logger.py
-import torch
-import numpy as np
-import time
+
 import sys
-import datetime
+import time
+
+import numpy as np
+import torch
+from libs.utils.davis_JF import db_eval_boundary, db_eval_iou
 
 
 class Logger(object):
@@ -118,9 +120,6 @@ def measure(y_in, pred_in):
     fp = np.logical_and(np.logical_not(y), pred).sum()
     fn = np.logical_and(y, np.logical_not(pred)).sum()
     return tp, tn, fp, fn
-
-
-from libs.utils.davis_JF import db_eval_boundary, db_eval_iou
 
 
 class TreeEvaluation():

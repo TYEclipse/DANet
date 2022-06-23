@@ -7,13 +7,14 @@ import os
 
 import numpy as np
 import torch
+import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from libs.config.DAN_config import OPTION as opt
 from libs.dataset.transform import TestTransform, TrainTransform
 from libs.dataset.YoutubeVOS import YTVOSDataset
 from libs.models.DAN.DAN import DAN
-from libs.utils.Logger import LogTime, Loss_record, Logger, TimeRecord
+from libs.utils.Logger import Logger, Loss_record, TimeRecord
 from libs.utils.Logger import TreeEvaluation as Evaluation
 from libs.utils.loss import cross_entropy_loss, mask_iou_loss
 from libs.utils.optimer import DAN_optimizer
@@ -49,6 +50,8 @@ def get_arguments():
     # 训练时长相关参数
     parser.add_argument("--step_iter", type=int, default=100)
     parser.add_argument("--max_epoch", type=int, default=101)
+    parser.add_argument("--valid_epoch", type=int, default=5)
+    parser.add_argument("--valid_interval", type=int, default=5)
 
     # 验证相关参数
     parser.add_argument("--novalid", action='store_true')
@@ -61,6 +64,24 @@ def criterion(pred, target, bootstrap=1):
         cross_entropy_loss(pred, target, bootstrap),
         mask_iou_loss(pred, target)
     ]
+
+
+# 验证
+def valid_epoch(model: nn.Module, data_loader: DataLoader,
+                device: torch.device, valid_evaluation: Evaluation):
+    model.eval()
+    for i, (query_img, query_mask, support_img, support_mask,
+            idx) in enumerate(data_loader):
+        query_img = query_img.to(device)
+        query_mask = query_mask.to(device)
+        support_img = support_img.to(device)
+        support_mask = support_mask.to(device)
+        idx = idx.to(device)
+        with torch.no_grad():
+            pred_map = model(query_img, support_img, support_mask)
+            pred_map = pred_map.squeeze(2)
+            query_mask = query_mask.squeeze(2)
+            valid_evaluation.update_evl(idx, query_mask, pred_map)
 
 
 def train(args, logger: Logger):
@@ -169,28 +190,24 @@ def train(args, logger: Logger):
                                                       loss_str))
 
         # validation
-        if not args.novalid:
-            net.eval()
-            valid_time = LogTime()
-            valid_time.t1()
-            with torch.no_grad():
-                for step, data in enumerate(val_loader):
-                    query_img, query_mask, support_img, support_mask, idx = data
-                    query_img, query_mask, support_img, support_mask, idx \
-                        = query_img.cuda(), query_mask.cuda(), support_img.cuda(), support_mask.cuda(), idx.cuda()
-                    pred_map = net(query_img, support_img, support_mask)
-                    pred_map = pred_map.squeeze(2)
-                    query_mask = query_mask.squeeze(2)
-                    valid_evaluations.update_evl(idx, query_mask, pred_map)
-            mean_iou = np.mean(valid_evaluations.iou_list)
-            valid_time.t2()
+        if not args.novalid and epoch % args.valid_interval == 0:
+            mean_iou_list = []
+            iou_lists = []
+            for _ in range(args.valid_epoch):
+                valid_epoch(net, val_loader, torch.device('cuda'),
+                            valid_evaluations)
+                mean_iou_list.append(valid_evaluations.iou_list)
+                iou_lists.append(valid_evaluations.iou_list)
+
+            mean_iou = np.mean(mean_iou_list)
+            print('Mean IOU: {}'.format(mean_iou))
+            iou_list = np.mean(iou_lists, axis=0)
+            iou_str = ' '.join(['%.4f' % n for n in iou_list])
             if best_iou < mean_iou:
                 is_best = True
                 best_iou = mean_iou
-            iou_list = ['%.4f' % n for n in valid_evaluations.iou_list]
-            strings_iou_list = ' '.join(iou_list)
             logger.info('[Valid:{}/{}] Mean IOU: {:.4f} IOU: {}'.format(
-                epoch, args.max_epoch - 1, mean_iou, strings_iou_list))
+                epoch, args.max_epoch - 1, mean_iou, iou_str))
 
         save_model(args, epoch, net, optimizer, is_best)
 
@@ -215,6 +232,7 @@ if __name__ == '__main__':
         count += 1
         log_file = os.path.join(args.snapshot_dir,
                                 'train_log_{}.txt'.format(count))
+    print('log file: {}'.format(log_file))
     logger = Logger(log_file)
     logger.info('Running parameters:')
     logger.info(str(args))
