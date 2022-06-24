@@ -10,10 +10,11 @@ The architecture of our Domain Agent Network:
 
 ## Environment
 
-```
-git clone git@github.com:scutpaul/DANet.git
-conda create -n FSVOS python=3.9
-conda activate FSVOS
+```sh
+git clone git@github.com:TYEclipse/DANet_v2.git
+cd DANet_v2
+conda create -n DANet_v2 python=3.9
+conda activate DANet_v2
 conda install pytorch torchvision torchaudio cudatoolkit=10.2 -c pytorch
 pip install opencv-python cython easydict imgaug
 

@@ -200,7 +200,6 @@ def train(args, logger: Logger):
                 iou_lists.append(valid_evaluations.iou_list)
 
             mean_iou = np.mean(mean_iou_list)
-            print('Mean IOU: {}'.format(mean_iou))
             iou_list = np.mean(iou_lists, axis=0)
             iou_str = ' '.join(['%.4f' % n for n in iou_list])
             if best_iou < mean_iou:
