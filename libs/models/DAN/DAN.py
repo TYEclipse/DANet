@@ -11,6 +11,7 @@ import torchvision.models as models
 
 
 class Encoder(nn.Module):
+
     def __init__(self):
         super(Encoder, self).__init__()
 
@@ -36,6 +37,7 @@ class Encoder(nn.Module):
 
 
 class ResBlock(nn.Module):
+
     def __init__(self, indim, outdim=None, stride=1):
         super(ResBlock, self).__init__()
         if outdim is None:
@@ -67,6 +69,7 @@ class ResBlock(nn.Module):
 
 
 class Refine(nn.Module):
+
     def __init__(self, inplanes, planes):
         super(Refine, self).__init__()
         self.convFS = nn.Conv2d(inplanes,
@@ -86,6 +89,7 @@ class Refine(nn.Module):
 
 
 class Decoder(nn.Module):
+
     def __init__(self, inplane, mdim):
         super(Decoder, self).__init__()
         self.convFM = nn.Conv2d(inplane,
@@ -137,42 +141,93 @@ class QueryKeyValue(nn.Module):
         return self.query(x), self.Key(x), self.Value(x)
 
 
+class DomainAgentAttention(nn.Module):
+
+    def __init__(self, in_dim, key_dim, val_dim):
+        super(DomainAgentAttention, self).__init__()
+        self.q_dim = key_dim
+        self.k_dim = key_dim
+        self.v_dim = val_dim
+        self.support_qkv = QueryKeyValue(indim=in_dim,
+                                         keydim=key_dim,
+                                         valdim=val_dim)
+        self.query_qkv = QueryKeyValue(indim=in_dim,
+                                       keydim=key_dim,
+                                       valdim=val_dim)
+
+    def attention(self, Q, K, V):
+        '''
+        Q: Batch, Length, Channels
+        K: Batch, Length, Channels
+        V: Batch, Length, Channels
+        out: Batch, Length, Channels
+        '''
+        QK = torch.bmm(Q, K.transpose(1, 2))
+        QK = QK / (K.shape[-1]**0.5)
+        QK = F.softmax(QK, dim=2)
+        out = torch.bmm(QK, V)
+        return out
+
+    def forward(self, support, query):
+        '''
+        support: batch_size, support_frames, channels, height, width
+        query: batch_size, query_frames, channels, height, width
+        '''
+        b, _, c, h, w = support.shape
+        support_frames = support.shape[1]
+        query_frames = query.shape[1]
+
+        _, support_k, support_v = self.support_qkv(
+            support.view(b * support_frames, c, h, w))
+        query_q, query_k, _ = self.query_qkv(
+            query.view(b * query_frames, c, h, w))
+
+        support_k = support_k.view(b, support_frames, self.k_dim, h, w)
+        support_v = support_v.view(b, support_frames, self.v_dim, h, w)
+
+        query_q = query_q.view(b, query_frames, self.q_dim, h, w)
+        query_k = query_k.view(b, query_frames, self.k_dim, h, w)
+
+        domain_frame_idx = int(query_frames / 2)
+        domain_q = query_q[:, domain_frame_idx, :, :, :]
+        domain_k = query_k[:, domain_frame_idx, :, :, :]
+
+        # attention(domain_q, support_k, support_v)
+        domain_q = domain_q.view(b, 1, self.q_dim * h * w)
+        support_k = support_k.view(b, support_frames, self.k_dim * h * w)
+        support_v = support_v.view(b, support_frames, self.v_dim * h * w)
+        domain_attention = self.attention(domain_q, support_k, support_v)
+
+        # attention(query_q, domain_k, domain_attention)
+        query_q = query_q.view(b, query_frames, self.q_dim * h * w)
+        domain_k = domain_k.view(b, 1, self.k_dim * h * w)
+        query_attention = self.attention(query_q, domain_k, domain_attention)
+
+        query_attention = query_attention.view(b, query_frames, self.v_dim, h,
+                                               w)
+
+        return query_attention
+
+
 class DAN(nn.Module):
+
     def __init__(self):
         super(DAN, self).__init__()
         self.encoder = Encoder()  # output 2048
         encoder_dim = 1024
-        h_encdim = int(encoder_dim / 2)
-        self.support_qkv = QueryKeyValue(encoder_dim,
-                                         keydim=128,
-                                         valdim=h_encdim)
-        self.query_qkv = QueryKeyValue(encoder_dim,
-                                       keydim=128,
-                                       valdim=h_encdim)
+        self.k_dim = 128
+        self.v_dim = int(encoder_dim / 2)
+
+        self.daa = DomainAgentAttention(encoder_dim, self.k_dim, self.v_dim)
 
         self.conv_q = nn.Conv2d(encoder_dim,
-                                h_encdim,
+                                self.v_dim,
                                 kernel_size=1,
                                 stride=1,
                                 padding=0)
 
         # low_level_features to 48 channels
         self.Decoder = Decoder(encoder_dim, 256)
-
-    def transformer(self, Q, K, V):
-        # Q : B CQ WQ
-        # K : B WK CQ
-        # V : B CV WK
-        B, CQ, WQ = Q.shape
-        _, CV, WK = V.shape
-
-        P = torch.bmm(K, Q)  # B WK WQ
-        P = P / math.sqrt(CQ)
-        P = torch.softmax(P, dim=1)
-
-        M = torch.bmm(V, P)  # B CV WQ
-
-        return M, P
 
     def forward(self, img, support_image, support_mask, time=None):
 
@@ -209,49 +264,22 @@ class DAN(nn.Module):
         support_fg_feat = support_feat * support_mask
         # support_bg_feat = support_feat * (1 - support_mask)
 
-        # q,k = batch*frames, 128, h/16, w/16
-        # v = batch*frames, 256, h/16, w/16
-        _, support_k, support_v = self.support_qkv(support_fg_feat)
-        query_q, query_k, query_v = self.query_qkv(query_feat)
-        _, _, qh, qw = query_k.shape
-        _, c, h, w = support_k.shape
-        _, vc, _, _ = support_v.shape
-
-        assert qh == h and qw == w
-        # transforms query_middle_q to support_kv
-        # support [b*f c h w] -> [b f c h w] -> [b c f h w] -> [b c WF]
-        support_k = support_k.view(batch, sframe, c, h, w)
-        support_v = support_v.view(batch, sframe, vc, h, w)
-        # B, WK, CK
-        support_k = support_k.permute(0, 2, 1, 3, 4).contiguous().view(
-            batch, c, -1).permute(0, 2, 1).contiguous()
-        # B, CV, WK
-        support_v = support_v.permute(0, 2, 1, 3,
-                                      4).contiguous().view(batch, vc, -1)
-        middle_frame_index = int(frame / 2)
-        query_q = query_q.view(batch, frame, c, h, w)
-        query_k = query_k.view(batch, frame, c, h, w)
-        middle_q = query_q[:, middle_frame_index]
-        assert len(middle_q.shape) == 4
-        # B, CQ, WQ
-        middle_q = middle_q.view(batch, c, -1)
-        # B CV WQ --> V
-        new_V, sim_refer = self.transformer(middle_q, support_k, support_v)
-        # print(sim_refer.shape)
-        # transform query_qkv to query_middle_kv
-        # B WK CK
-        middle_K = query_k[:, middle_frame_index]
-        middle_K = middle_K.view(batch, c, -1).permute(0, 2, 1).contiguous()
-
-        query_q = query_q.permute(0, 2, 1, 3,
-                                  4).contiguous().view(batch, c, -1)
-        Out, sim_middle = self.transformer(query_q, middle_K, new_V)
-        after_transform = Out.view(batch, vc, frame, h, w)
-        after_transform = after_transform.permute(0, 2, 1, 3, 4).contiguous()
+        # Domain Agent Attention
+        support_fg_feat = support_fg_feat.view(batch, sframe,
+                                               support_fg_feat.shape[1],
+                                               support_fg_feat.shape[2],
+                                               support_fg_feat.shape[3])
+        query_feat = query_feat.view(batch, frame, query_feat.shape[1],
+                                     query_feat.shape[2], query_feat.shape[3])
+        after_transform = self.daa(support_fg_feat, query_feat)
 
         # [batch*frames, 1024, h/16,w/16]
+        after_transform = after_transform.view(batch * frame,
+                                               after_transform.shape[2],
+                                               after_transform.shape[3],
+                                               after_transform.shape[4])
+
         query_feat = self.conv_q(query_feat)
-        after_transform = after_transform.view(-1, vc, h, w)
         after_transform = torch.cat((after_transform, query_feat), dim=1)
         # aspp
         # x = self.aspp(after_transform)

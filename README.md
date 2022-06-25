@@ -16,7 +16,7 @@ cd DANet_v2
 conda create -n DANet_v2 python=3.9
 conda activate DANet_v2
 conda install pytorch torchvision torchaudio cudatoolkit=10.2 -c pytorch
-pip install opencv-python cython easydict imgaug
+pip install opencv-python cython easydict imgaug flake8
 
 # https://github.com/youtubevos/cocoapi.git
 git clone git@github.com:youtubevos/cocoapi.git
