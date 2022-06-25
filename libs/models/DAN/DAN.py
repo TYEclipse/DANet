@@ -258,7 +258,7 @@ class DAN(nn.Module):
                                      align_corners=True)
         query_feat_l1 = encoder_f_l1[:batch_frame]
         query_feat_l2 = encoder_f_l2[:batch_frame]
-        query_feat = encoder_f_l3[:batch_frame]
+        query_feat_l3 = encoder_f_l3[:batch_frame]
         support_feat = encoder_f_l3[batch_frame:]
 
         support_fg_feat = support_feat * support_mask
@@ -269,8 +269,9 @@ class DAN(nn.Module):
                                                support_fg_feat.shape[1],
                                                support_fg_feat.shape[2],
                                                support_fg_feat.shape[3])
-        query_feat = query_feat.view(batch, frame, query_feat.shape[1],
-                                     query_feat.shape[2], query_feat.shape[3])
+        query_feat = query_feat_l3.view(batch, frame, query_feat_l3.shape[1],
+                                        query_feat_l3.shape[2],
+                                        query_feat_l3.shape[3])
         after_transform = self.daa(support_fg_feat, query_feat)
 
         # [batch*frames, 1024, h/16,w/16]
@@ -279,8 +280,8 @@ class DAN(nn.Module):
                                                after_transform.shape[3],
                                                after_transform.shape[4])
 
-        query_feat = self.conv_q(query_feat)
-        after_transform = torch.cat((after_transform, query_feat), dim=1)
+        query_feat_l3 = self.conv_q(query_feat_l3)
+        after_transform = torch.cat((after_transform, query_feat_l3), dim=1)
         # aspp
         # x = self.aspp(after_transform)
         if time is not None:

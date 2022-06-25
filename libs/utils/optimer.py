@@ -10,9 +10,7 @@ def DAN_optimizer(model):
         param.requires_grad = False
 
     opt = Adam([{
-        'params': model.support_qkv.parameters()
-    }, {
-        'params': model.query_qkv.parameters()
+        'params': model.daa.parameters()
     }, {
         'params': model.conv_q.parameters()
     }, {
