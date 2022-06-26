@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 # @Author  : Haoxin Chen
 # @File    : DAN.py
-import math
 
 import torch
 import torch.nn as nn
@@ -11,33 +10,26 @@ import torchvision.models as models
 
 
 class Encoder(nn.Module):
-
     def __init__(self):
         super(Encoder, self).__init__()
-
         resnet = models.resnet50(pretrained=True, progress=True)
         self.layer0 = nn.Sequential(resnet.conv1, resnet.bn1, resnet.relu,
                                     resnet.maxpool)
-        self.layer1 = resnet.layer1  # 1/4, 256
-        self.layer2 = resnet.layer2  # 1/8, 512
-        self.layer3 = resnet.layer3  # 1/16, 1024
-        self.layer4 = resnet.layer4  # 1/32, 2048
-        self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.layer1 = resnet.layer1
+        self.layer2 = resnet.layer2
+        self.layer3 = resnet.layer3
+        self.layer4 = resnet.layer4
 
     def forward(self, x):
-
         x = self.layer0(x)
-
         l1 = self.layer1(x)
         l2 = self.layer2(l1)
         l3 = self.layer3(l2)
         l4 = self.layer4(l3)
-
         return [l1, l2, l3, l4]
 
 
 class ResBlock(nn.Module):
-
     def __init__(self, indim, outdim=None, stride=1):
         super(ResBlock, self).__init__()
         if outdim is None:
@@ -69,7 +61,6 @@ class ResBlock(nn.Module):
 
 
 class Refine(nn.Module):
-
     def __init__(self, inplanes, planes):
         super(Refine, self).__init__()
         self.convFS = nn.Conv2d(inplanes,
@@ -89,7 +80,6 @@ class Refine(nn.Module):
 
 
 class Decoder(nn.Module):
-
     def __init__(self, inplane, mdim):
         super(Decoder, self).__init__()
         self.convFM = nn.Conv2d(inplane,
@@ -107,8 +97,14 @@ class Decoder(nn.Module):
                                padding=(1, 1),
                                stride=1)
 
-    def forward(self, r4, r3, r2, f):
-        m4 = self.ResMM(self.convFM(r4))
+        self.conv_q = nn.Conv2d(1024, 512, kernel_size=1, stride=1, padding=0)
+
+    def forward(self, r5, r4, r3, r2, f):
+
+        r4 = self.conv_q(r4)
+        m5 = torch.cat((r5, r4), dim=1)
+        m4 = self.ResMM(self.convFM(m5))
+
         m3 = self.RF3(r3, m4)  # out: 1/8, 256
         m2 = self.RF2(r2, m3)  # out: 1/4, 256
 
@@ -118,6 +114,9 @@ class Decoder(nn.Module):
                           size=f.shape[2:],
                           mode='bilinear',
                           align_corners=True)
+
+        p = torch.sigmoid(p)
+
         return p
 
 
@@ -142,7 +141,6 @@ class QueryKeyValue(nn.Module):
 
 
 class DomainAgentAttention(nn.Module):
-
     def __init__(self, in_dim, key_dim, val_dim):
         super(DomainAgentAttention, self).__init__()
         self.q_dim = key_dim
@@ -210,7 +208,6 @@ class DomainAgentAttention(nn.Module):
 
 
 class DAN(nn.Module):
-
     def __init__(self):
         super(DAN, self).__init__()
         self.encoder = Encoder()  # output 2048
@@ -220,78 +217,48 @@ class DAN(nn.Module):
 
         self.daa = DomainAgentAttention(encoder_dim, self.k_dim, self.v_dim)
 
-        self.conv_q = nn.Conv2d(encoder_dim,
-                                self.v_dim,
-                                kernel_size=1,
-                                stride=1,
-                                padding=0)
-
         # low_level_features to 48 channels
         self.Decoder = Decoder(encoder_dim, 256)
 
-    def forward(self, img, support_image, support_mask, time=None):
+    def forward(self, query_video, support_image, support_mask):
+        b, q_frames, in_c, in_h, in_w = query_video.shape
+        _, s_frame, mask_c, _, _ = support_mask.shape
 
-        batch, frame, in_channels, height, width = img.shape
-        _, sframe, mask_channels, Sheight, Swidth = support_mask.shape
-        assert height == Sheight
-        assert width == Swidth
-
-        batch_frame = batch * frame
-        img = img.view(-1, in_channels, height, width)
-        support_image = support_image.view(-1, in_channels, height, width)
-        support_mask = support_mask.view(-1, mask_channels, height, width)
-
-        in_f = torch.cat((img, support_image), dim=0)
+        query_video = query_video.view(b * q_frames, in_c, in_h, in_w)
+        support_image = support_image.view(b * s_frame, in_c, in_h, in_w)
+        in_f = torch.cat((query_video, support_image), dim=0)
         encoder_f = self.encoder(in_f)
 
-        encoder_f_l1 = encoder_f[0]
-        encoder_f_l2 = encoder_f[1]
-        encoder_f_l3 = encoder_f[2]
-        # encoder_f_l4 = encoder_f[3]
+        query_feat_l1 = encoder_f[0][:b * q_frames]
+        query_feat_l2 = encoder_f[1][:b * q_frames]
+        query_feat_l3 = encoder_f[2][:b * q_frames]
+        support_feat = encoder_f[2][b * q_frames:]
 
-        if time is not None:
-            time.t1()
-
+        support_mask = support_mask.view(b * s_frame, mask_c, in_h, in_w)
         support_mask = F.interpolate(support_mask,
-                                     encoder_f_l3.size()[2:],
+                                     support_feat.size()[2:],
                                      mode='bilinear',
                                      align_corners=True)
-        query_feat_l1 = encoder_f_l1[:batch_frame]
-        query_feat_l2 = encoder_f_l2[:batch_frame]
-        query_feat_l3 = encoder_f_l3[:batch_frame]
-        support_feat = encoder_f_l3[batch_frame:]
-
         support_fg_feat = support_feat * support_mask
-        # support_bg_feat = support_feat * (1 - support_mask)
 
         # Domain Agent Attention
-        support_fg_feat = support_fg_feat.view(batch, sframe,
+        support_fg_feat = support_fg_feat.view(b, s_frame,
                                                support_fg_feat.shape[1],
                                                support_fg_feat.shape[2],
                                                support_fg_feat.shape[3])
-        query_feat = query_feat_l3.view(batch, frame, query_feat_l3.shape[1],
+        query_feat = query_feat_l3.view(b, q_frames, query_feat_l3.shape[1],
                                         query_feat_l3.shape[2],
                                         query_feat_l3.shape[3])
         after_transform = self.daa(support_fg_feat, query_feat)
 
-        # [batch*frames, 1024, h/16,w/16]
-        after_transform = after_transform.view(batch * frame,
+        after_transform = after_transform.view(b * q_frames,
                                                after_transform.shape[2],
                                                after_transform.shape[3],
                                                after_transform.shape[4])
+        pred_map = self.Decoder(after_transform, query_feat_l3, query_feat_l2,
+                                query_feat_l1, query_video)
 
-        query_feat_l3 = self.conv_q(query_feat_l3)
-        after_transform = torch.cat((after_transform, query_feat_l3), dim=1)
-        # aspp
-        # x = self.aspp(after_transform)
-        if time is not None:
-            time.t2()
-        x = self.Decoder(after_transform, query_feat_l2, query_feat_l1, img)
-
-        pred_map = torch.nn.Sigmoid()(x)
-
-        # batch, frame, outchannel, height, width
-        pred_map = pred_map.view(batch, frame, 1, height, width)
+        pred_map = pred_map.view(b, q_frames, 1, in_h, in_w)
         return pred_map
 
 

@@ -12,8 +12,6 @@ def DAN_optimizer(model):
     opt = Adam([{
         'params': model.daa.parameters()
     }, {
-        'params': model.conv_q.parameters()
-    }, {
         'params': model.Decoder.parameters()
     }],
                lr=1e-5,
