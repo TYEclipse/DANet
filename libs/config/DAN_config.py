@@ -7,7 +7,8 @@ import os
 from easydict import EasyDict
 
 OPTION = EasyDict()
-OPTION.ROOT_PATH = os.path.join(os.path.expanduser('~'), 'my_farm/fsvos/DANet_v2')
+OPTION.ROOT_PATH = os.path.join(os.path.expanduser('~'),
+                                'my_farm/fsvos/DANet_v2')
 OPTION.SNAPSHOTS_DIR = os.path.join(OPTION.ROOT_PATH, 'workdir')
 OPTION.DATASETS_DIR = os.path.join(OPTION.ROOT_PATH, 'data')
 

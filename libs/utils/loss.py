@@ -3,8 +3,9 @@
 # @Author  : Haoxin Chen
 # @File    : loss.py
 import torch
-def mask_iou(pred, target):
 
+
+def mask_iou(pred, target):
     """
     param: pred of size [N x H x W]
     param: target of size [N x H x W]
@@ -21,9 +22,11 @@ def mask_iou(pred, target):
 
     return iou
 
+
 def binary_entropy_loss(pred, target, eps=0.001):
 
-    ce = - 1.0 * target * torch.log(pred + eps) - (1 - target) * torch.log(1 - pred + eps)
+    ce = -1.0 * target * torch.log(pred + eps) - (
+        1 - target) * torch.log(1 - pred + eps)
 
     loss = torch.mean(ce)
 
@@ -31,15 +34,16 @@ def binary_entropy_loss(pred, target, eps=0.001):
 
     return loss
 
-def cross_entropy_loss(pred, target, bootstrap=0.4, eps=0.001,weight=1):
 
+def cross_entropy_loss(pred, target, bootstrap=0.4, eps=0.001, weight=1):
 
     # pred: [N x F x H x W]
     # mask: [N x F x H x W] one-hot encoded
     N, F, H, W = target.shape
 
     # pred = -1 * torch.log(pred + eps)
-    loss = - 1.0 * target * torch.log(pred + eps) - weight * (1 - target) * torch.log(1 - pred + eps)
+    loss = -1.0 * target * torch.log(pred + eps) - weight * (
+        1 - target) * torch.log(1 - pred + eps)
     # loss = - 1.0 * target * torch.log(pred + eps)
     # loss = torch.sum(pred[:, :num_object+1] * mask[:, :num_object+1])
     # loss = loss / (H * W * N)
@@ -52,11 +56,12 @@ def cross_entropy_loss(pred, target, bootstrap=0.4, eps=0.001,weight=1):
     # print(loss.shape)
     if bootstrap == 1:
         return torch.mean(loss)
-    loss = loss.view(N,F,-1)
+    loss = loss.view(N, F, -1)
     mloss, _ = torch.sort(loss, dim=-1, descending=True)
-    loss = torch.mean(mloss[:,:, :num])
+    loss = torch.mean(mloss[:, :, :num])
 
     return loss
+
 
 def mask_iou_loss(pred, mask):
 
