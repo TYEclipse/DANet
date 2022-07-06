@@ -139,3 +139,4 @@ run_train.sh
 run_test.sh
 data
 .vscode/
+result.csv

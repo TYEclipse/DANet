@@ -106,8 +106,8 @@ def finetune(args, model, imgs, masks, test_list):
             if mean_iou > stop_iou:
                 print('stop_finetune', mean_iou)
                 break
-            iou_str = valid_evaluations.logiou(0, train_step)
-            loss_str = losses.getloss(0, train_step)
+            iou_str = valid_evaluations.logiou()
+            loss_str = losses.getloss()
             print(loss_str, ' | ', iou_str, ' | ')
 
     finetune_path = os.path.join(args.finetune_path,
@@ -152,6 +152,7 @@ def test(args):
     test_evaluations = Evaluation(class_list=test_list)
 
     support_img, support_mask = None, None
+
     for index, data in enumerate(test_dataloader):
 
         video_query_img = data[0]

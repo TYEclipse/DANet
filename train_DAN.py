@@ -176,7 +176,7 @@ def train(args, logger: Logger):
 
             train_evaluations.update_evl(idx, query_mask, pred_map)
 
-            if iter % args.step_iter == 0 and iter > 0:
+            if iter % args.step_iter == 1 and iter > 0:
                 total_time_str, remain_time_str = train_time_record.get_time(
                     epoch, iter)
                 iou_str = train_evaluations.logiou()

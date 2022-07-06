@@ -15,7 +15,6 @@ class Compose(object):
     """
     Combine several transformation in a serial manner
     """
-
     def __init__(self, transform=[]):
         self.transforms = transform
 
@@ -26,12 +25,11 @@ class Compose(object):
 
         return imgs, annos
 
-class Transpose(object):
 
+class Transpose(object):
     """
     transpose the image and mask
     """
-
     def __call__(self, imgs, annos):
 
         H, W, _ = imgs[0].shape
@@ -43,14 +41,12 @@ class Transpose(object):
 
             return timgs, tannos
 
-class RandomAffine(object):
 
+class RandomAffine(object):
     """
     Affine Transformation to each frame
     """
-
     def __call__(self, imgs, annos):
-
 
         seq = iaa.Sequential([
             iaa.Crop(percent=(0.0, 0.1), keep_size=True),
@@ -64,7 +60,6 @@ class RandomAffine(object):
             img = imgs[idx]
             anno = annos[idx]
 
-
             segmap = SegmentationMapsOnImage(anno, shape=img.shape)
             img_aug, segmap_aug = seq(image=img, segmentation_maps=segmap)
             imgs[idx] = img_aug
@@ -72,11 +67,11 @@ class RandomAffine(object):
 
         return imgs, annos
 
+
 class AdditiveNoise(object):
     """
     sum additive noise
     """
-
     def __init__(self, delta=5.0):
         self.delta = delta
         assert delta > 0.0
@@ -93,7 +88,6 @@ class RandomContrast(object):
     """
     randomly modify the contrast of each frame
     """
-
     def __init__(self, lower=0.97, upper=1.03):
         self.lower = lower
         self.upper = upper
@@ -112,7 +106,6 @@ class RandomMirror(object):
     """
     Randomly horizontally flip the video volume
     """
-
     def __init__(self):
         pass
 
@@ -133,11 +126,11 @@ class RandomMirror(object):
 
         return imgs, annos
 
+
 class ToFloat(object):
     """
     convert value type to float
     """
-
     def __init__(self):
         pass
 
@@ -150,12 +143,11 @@ class ToFloat(object):
 
         return imgs, annos
 
-class Rescale(object):
 
+class Rescale(object):
     """
     rescale the size of image and masks
     """
-
     def __init__(self, target_size):
         assert isinstance(target_size, (int, tuple, list))
         if isinstance(target_size, int):
@@ -176,24 +168,24 @@ class Rescale(object):
         for id, img in enumerate(imgs):
             canvas = np.zeros((new_height, new_width, 3), dtype=np.float32)
             rescaled_img = cv2.resize(img, (width, height))
-            canvas[pad_t:pad_t+height, pad_l:pad_l+width, :] = rescaled_img
+            canvas[pad_t:pad_t + height, pad_l:pad_l + width, :] = rescaled_img
             imgs[id] = canvas
 
         for id, anno in enumerate(annos):
             canvas = np.zeros((new_height, new_width, 1), dtype=np.float32)
-            rescaled_anno = cv2.resize(anno, (width, height), cv2.INTER_NEAREST)
-            canvas[pad_t:pad_t + height, pad_l:pad_l + width, :] = rescaled_anno[:,:,np.newaxis]
+            rescaled_anno = cv2.resize(anno, (width, height),
+                                       cv2.INTER_NEAREST)
+            canvas[pad_t:pad_t + height,
+                   pad_l:pad_l + width, :] = rescaled_anno[:, :, np.newaxis]
             annos[id] = canvas
 
         return imgs, annos
 
 
 class Stack(object):
-
     """
     stack adjacent frames into input tensors
     """
-
     def __call__(self, imgs, annos):
 
         num_img = len(imgs)
@@ -207,12 +199,11 @@ class Stack(object):
 
         return img_stack, anno_stack
 
-class ToTensor(object):
 
+class ToTensor(object):
     """
     convert to torch.Tensor
     """
-
     def __call__(self, imgs, annos):
 
         imgs = torch.from_numpy(imgs.copy())
@@ -223,11 +214,13 @@ class ToTensor(object):
 
         return imgs, annos
 
-class Normalize(object):
 
+class Normalize(object):
     def __init__(self):
-        self.mean = np.array([0.485, 0.456, 0.406]).reshape([1, 1, 3]).astype(np.float32)
-        self.std = np.array([0.229, 0.224, 0.225]).reshape([1, 1, 3]).astype(np.float32)
+        self.mean = np.array([0.485, 0.456,
+                              0.406]).reshape([1, 1, 3]).astype(np.float32)
+        self.std = np.array([0.229, 0.224,
+                             0.225]).reshape([1, 1, 3]).astype(np.float32)
 
     def __call__(self, imgs, annos):
 
@@ -236,23 +229,21 @@ class Normalize(object):
 
         return imgs, annos
 
-class ReverseClip(object):
 
+class ReverseClip(object):
     def __call__(self, imgs, annos):
 
         return imgs[::-1], annos[::-1]
 
 
-
 class AddAxis(object):
-
     def __call__(self, imgs, annos):
         for idx, anno in enumerate(annos):
-            annos[idx] = anno[:,:,np.newaxis]
+            annos[idx] = anno[:, :, np.newaxis]
         return imgs, annos
 
-class TrainTransform(object):
 
+class TrainTransform(object):
     def __init__(self, size):
         self.transform = Compose([
             AddAxis(),
@@ -273,7 +264,6 @@ class TrainTransform(object):
 
 
 class TestTransform(object):
-
     def __init__(self, size):
         self.transform = Compose([
             AddAxis(),
@@ -286,6 +276,7 @@ class TestTransform(object):
 
     def __call__(self, imgs, annos):
         return self.transform(imgs, annos)
+
 
 class UnNormalize(object):
     def __init__(self, mean, std):
@@ -304,9 +295,11 @@ class UnNormalize(object):
             # The normalize code -> t.sub_(m).div_(s)
         return tensor
 
+
 class ReverseToImage(object):
     def __init__(self):
-        self.transform = UnNormalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
+        self.transform = UnNormalize(mean=(0.485, 0.456, 0.406),
+                                     std=(0.229, 0.224, 0.225))
 
-    def __call__(self,imgs):
+    def __call__(self, imgs):
         return self.transform(imgs)
